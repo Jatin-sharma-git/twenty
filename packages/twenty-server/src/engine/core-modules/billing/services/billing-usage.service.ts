@@ -136,6 +136,76 @@ export class BillingUsageService {
     );
   }
 
+  async getCreditPackProductsUsage(
+    workspace: WorkspaceEntity,
+  ): Promise<BillingMeteredProductUsageDTO[]> {
+    const subscription =
+      await this.billingSubscriptionService.getCurrentBillingSubscriptionOrThrow(
+        { workspaceId: workspace.id },
+      );
+
+    const creditPackItemDetail =
+      await this.billingSubscriptionItemService.getResourceCreditSubscriptionItemDetails(
+        subscription.id,
+      );
+
+    if (!creditPackItemDetail) {
+      return [];
+    }
+
+    const { periodStart, periodEnd } = this.getSubscriptionPeriod(subscription);
+
+    return [
+      await this.buildResourceCreditUsage(
+        workspace.id,
+        subscription,
+        creditPackItemDetail,
+        periodStart,
+        periodEnd,
+      ),
+    ];
+  }
+
+  private async buildResourceCreditUsage(
+    workspaceId: string,
+    subscription: BillingSubscriptionEntity,
+    item: NonNullable<
+      Awaited<
+        ReturnType<
+          typeof this.billingSubscriptionItemService.getResourceCreditSubscriptionItemDetails
+        >
+      >
+    >,
+    periodStart: Date,
+    periodEnd: Date,
+  ): Promise<BillingMeteredProductUsageDTO> {
+    const usedCredits = await this.getCurrentPeriodCreditsUsed(
+      workspaceId,
+      periodStart,
+    );
+
+    const grantedCredits =
+      subscription.status === SubscriptionStatus.Trialing
+        ? item.freeTrialQuantity
+        : item.creditAmount;
+
+    const billingCustomer = await this.billingCustomerRepository.findOne({
+      where: { workspaceId },
+    });
+    const rolloverCredits = billingCustomer?.creditBalanceMicro ?? 0;
+
+    return {
+      productKey: item.productKey,
+      periodStart,
+      periodEnd,
+      usedCredits,
+      grantedCredits,
+      rolloverCredits,
+      totalGrantedCredits: grantedCredits + rolloverCredits,
+      unitPriceCents: item.unitPriceCents,
+    };
+  }
+
   //TODO: TO be deprecated
   private getSubscriptionPeriod(subscription: BillingSubscriptionEntity): {
     periodStart: Date;

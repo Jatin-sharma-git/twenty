@@ -61,5 +61,6 @@ const formatBillingDatabasePriceToLicensedPriceDTO = (
     unitAmount: billingPrice?.unitAmount ?? 0,
     stripePriceId: billingPrice?.stripePriceId,
     priceUsageType: BillingUsageType.LICENSED,
+    creditAmount: null,
   };
 };

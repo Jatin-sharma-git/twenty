@@ -12,10 +12,14 @@ import {
 import { PlansTags } from '@/settings/billing/components/internal/PlansTags';
 import { useBillingWording } from '@/settings/billing/hooks/useBillingWording';
 import { useCurrentBillingFlags } from '@/settings/billing/hooks/useCurrentBillingFlags';
+import { useCurrentCreditPack } from '@/settings/billing/hooks/useCurrentCreditPack';
 import { useCurrentMetered } from '@/settings/billing/hooks/useCurrentMetered';
 import { useCurrentPlan } from '@/settings/billing/hooks/useCurrentPlan';
 import { useEndSubscriptionTrialPeriod } from '@/settings/billing/hooks/useEndSubscriptionTrialPeriod';
 import { useGetWorkflowNodeExecutionUsage } from '@/settings/billing/hooks/useGetWorkflowNodeExecutionUsage';
+import { useGetResourceCreditUsage } from '@/settings/billing/hooks/useGetResourceCreditUsage';
+import { useIsFeatureEnabled } from '@/workspace/hooks/useIsFeatureEnabled';
+import { FeatureFlagKey } from '~/generated-metadata/graphql';
 import { useHasNextBillingPhase } from '@/settings/billing/hooks/useHasNextBillingPhase';
 import { useNextBillingPhase } from '@/settings/billing/hooks/useNextBillingPhase';
 import { useNextBillingSeats } from '@/settings/billing/hooks/useNextBillingSeats';
@@ -103,11 +107,19 @@ export const SettingsBillingSubscriptionInfo = ({
 
   const { openModal } = useModal();
 
+  const isV2 = useIsFeatureEnabled(FeatureFlagKey.IS_BILLING_V2_ENABLED);
+
   const { refetchMeteredProductsUsage } = useGetWorkflowNodeExecutionUsage();
+  const { refetchResourceCreditUsage } = useGetResourceCreditUsage();
+
+  const refetchUsage = isV2
+    ? refetchResourceCreditUsage
+    : refetchMeteredProductsUsage;
 
   const { enqueueSuccessSnackBar, enqueueErrorSnackBar } = useSnackBar();
 
   const { currentMeteredBillingPrice } = useCurrentMetered();
+  const { currentCreditPackBillingPrice } = useCurrentCreditPack();
 
   const { currentPlan, oppositPlan } = useCurrentPlan();
   const { isEnterprisePlan, isYearlyPlan, isMonthlyPlan, isProPlan } =
@@ -121,7 +133,21 @@ export const SettingsBillingSubscriptionInfo = ({
   const nextInterval =
     splitedPhaseItemsInPrices?.nextLicensedPrice?.recurringInterval;
   const nextMeteredBillingPrice = splitedPhaseItemsInPrices.nextMereredPrice;
+  const nextCreditPackPrice = splitedPhaseItemsInPrices.nextCreditPackPrice;
   const subscriptionStatus = useSubscriptionStatus();
+
+  const currentInterval = isV2
+    ? currentBillingSubscription.interval
+    : currentMeteredBillingPrice?.recurringInterval;
+
+  const currentCreditsByPeriod = isV2
+    ? currentCreditPackBillingPrice?.creditAmount ?? null
+    : (currentMeteredBillingPrice as { tiers?: { upTo: number }[] } | null)
+        ?.tiers?.[0]?.upTo ?? null;
+
+  const nextCreditsByPeriod = isV2
+    ? nextCreditPackPrice?.creditAmount ?? null
+    : nextMeteredBillingPrice?.tiers?.[0]?.upTo ?? null;
 
   const {
     getIntervalLabelAsAdjectiveCapitalize,
@@ -210,7 +236,7 @@ export const SettingsBillingSubscriptionInfo = ({
       currentBillingSubscription,
       billingSubscriptions,
     });
-    refetchMeteredProductsUsage();
+    refetchUsage();
   };
 
   const switchInterval = async () => {
@@ -337,11 +363,15 @@ export const SettingsBillingSubscriptionInfo = ({
       }
 
       enqueueSuccessSnackBar({
-        message: t`Metered tier switching has been cancelled.`,
+        message: isV2
+          ? t`Credit pack switching has been cancelled.`
+          : t`Metered tier switching has been cancelled.`,
       });
     } catch {
       enqueueErrorSnackBar({
-        message: t`Error while cancelling metered tier switching.`,
+        message: isV2
+          ? t`Error while cancelling credit pack switching.`
+          : t`Error while cancelling metered tier switching.`,
       });
     } finally {
       setIsCancellingMeteredSwitch(false);
@@ -375,8 +405,7 @@ export const SettingsBillingSubscriptionInfo = ({
           label={t`Billing interval`}
           Icon={IconCalendarEvent}
           currentValue={getIntervalLabelAsAdjectiveCapitalize(
-            currentMeteredBillingPrice.recurringInterval ===
-              SubscriptionInterval.Month,
+            currentInterval === SubscriptionInterval.Month,
           )}
           nextValue={
             nextInterval
@@ -407,13 +436,17 @@ export const SettingsBillingSubscriptionInfo = ({
         <SubscriptionInfoRowContainer
           label={t`Credits by period`}
           Icon={IconCoins}
-          currentValue={formatNumber(currentMeteredBillingPrice.tiers[0].upTo, {
-            abbreviate: true,
-            decimals: 2,
-          })}
+          currentValue={
+            currentCreditsByPeriod !== null
+              ? formatNumber(currentCreditsByPeriod, {
+                  abbreviate: true,
+                  decimals: 2,
+                })
+              : undefined
+          }
           nextValue={
-            nextMeteredBillingPrice
-              ? formatNumber(nextMeteredBillingPrice.tiers[0].upTo, {
+            nextCreditsByPeriod !== null
+              ? formatNumber(nextCreditsByPeriod, {
                   abbreviate: true,
                   decimals: 2,
                 })
@@ -431,8 +464,7 @@ export const SettingsBillingSubscriptionInfo = ({
             disabled={isEndTrialPeriodLoading || isAnyActionLoading}
           />
         )}
-        {nextInterval &&
-          currentMeteredBillingPrice.recurringInterval !== nextInterval && (
+        {nextInterval && currentInterval !== nextInterval && (
             <Button
               Icon={IconCircleX}
               title={t`Cancel interval switching`}
@@ -442,8 +474,7 @@ export const SettingsBillingSubscriptionInfo = ({
             />
           )}
         {isMonthlyPlan &&
-          (!nextInterval ||
-            currentMeteredBillingPrice.recurringInterval === nextInterval) && (
+          (!nextInterval || currentInterval === nextInterval) && (
             <Button
               Icon={IconArrowUp}
               title={t`Switch to Yearly`}
@@ -455,8 +486,7 @@ export const SettingsBillingSubscriptionInfo = ({
             />
           )}
         {isYearlyPlan &&
-          (!nextInterval ||
-            currentMeteredBillingPrice.recurringInterval === nextInterval) && (
+          (!nextInterval || currentInterval === nextInterval) && (
             <Button
               Icon={IconArrowUp}
               title={t`Switch to Monthly`}
@@ -499,19 +529,25 @@ export const SettingsBillingSubscriptionInfo = ({
           />
         )}
         {/*@todo: find a way to check if the metered tier match when interval change too*/}
-        {nextInterval &&
-          nextMeteredBillingPrice &&
-          currentMeteredBillingPrice.recurringInterval === nextInterval &&
-          currentMeteredBillingPrice.tiers[0].upTo !==
-            nextMeteredBillingPrice.tiers[0].upTo && (
-            <Button
-              Icon={IconCircleX}
-              title={t`Cancel metered tier switching`}
-              variant="secondary"
-              onClick={() => openModal(CANCEL_SWITCH_METERED_PRICE_MODAL_ID)}
-              disabled={!canSwitchSubscription || isAnyActionLoading}
-            />
-          )}
+        {(isV2
+          ? nextCreditPackPrice &&
+            currentCreditsByPeriod !== nextCreditsByPeriod
+          : nextInterval &&
+            nextCreditsByPeriod !== null &&
+            currentInterval === nextInterval &&
+            currentCreditsByPeriod !== nextCreditsByPeriod) && (
+          <Button
+            Icon={IconCircleX}
+            title={
+              isV2
+                ? t`Cancel credit pack switching`
+                : t`Cancel metered tier switching`
+            }
+            variant="secondary"
+            onClick={() => openModal(CANCEL_SWITCH_METERED_PRICE_MODAL_ID)}
+            disabled={!canSwitchSubscription || isAnyActionLoading}
+          />
+        )}
       </StyledSwitchButtonContainer>
       <ConfirmationModal
         modalInstanceId={SWITCH_BILLING_INTERVAL_TO_YEARLY_MODAL_ID}
@@ -578,8 +614,16 @@ export const SettingsBillingSubscriptionInfo = ({
       />
       <ConfirmationModal
         modalInstanceId={CANCEL_SWITCH_METERED_PRICE_MODAL_ID}
-        title={t`Cancel metered tier switching?`}
-        subtitle={t`You have scheduled a metered tier change. Do you want to cancel it?`}
+        title={
+          isV2
+            ? t`Cancel credit pack switching?`
+            : t`Cancel metered tier switching?`
+        }
+        subtitle={
+          isV2
+            ? t`You have scheduled a credit pack change. Do you want to cancel it?`
+            : t`You have scheduled a metered tier change. Do you want to cancel it?`
+        }
         onConfirmClick={cancelMeteredSwitching}
         confirmButtonText={t`Confirm`}
         confirmButtonAccent="blue"

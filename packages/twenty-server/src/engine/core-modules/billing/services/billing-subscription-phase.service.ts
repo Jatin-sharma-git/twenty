@@ -159,4 +159,79 @@ export class BillingSubscriptionPhaseService {
       return false;
     }
   }
+
+  // V2 counterpart of buildPhaseUpdateParams — emits { price, quantity: 1 } for the credit pack;
+  // no billing_thresholds
+  async buildPhaseUpdateParamsV2({
+    basePlanStripePriceId,
+    seats,
+    creditPackStripePriceId,
+    startDate,
+    endDate,
+  }: {
+    basePlanStripePriceId: string;
+    seats: number;
+    creditPackStripePriceId: string;
+    startDate: Stripe.SubscriptionScheduleUpdateParams.Phase['start_date'];
+    endDate: number | undefined;
+  }): Promise<Stripe.SubscriptionScheduleUpdateParams.Phase> {
+    return {
+      start_date: startDate,
+      ...(endDate ? { end_date: endDate } : {}),
+      proration_behavior: 'none',
+      items: [
+        { price: basePlanStripePriceId, quantity: seats },
+        { price: creditPackStripePriceId, quantity: 1 },
+      ],
+    };
+  }
+
+  // V2 counterpart of isSamePhaseSignature — compares credit pack price via productKey lookup
+  async isSamePhaseSignatureV2(
+    a: Stripe.SubscriptionScheduleUpdateParams.Phase,
+    b: Stripe.SubscriptionScheduleUpdateParams.Phase,
+  ): Promise<boolean> {
+    try {
+      const phaseALicensedPriceIdAndQuantity =
+        this.getLicensedPriceIdAndQuantityFromPhaseUpdateParams(a);
+      const phaseBLicensedPriceIdAndQuantity =
+        this.getLicensedPriceIdAndQuantityFromPhaseUpdateParams(b);
+      const phaseACreditPackPriceId =
+        this.getCreditPackPriceIdFromPhaseUpdateParams(a);
+      const phaseBCreditPackPriceId =
+        this.getCreditPackPriceIdFromPhaseUpdateParams(b);
+
+      return (
+        phaseALicensedPriceIdAndQuantity.price ===
+          phaseBLicensedPriceIdAndQuantity.price &&
+        phaseALicensedPriceIdAndQuantity.quantity ===
+          phaseBLicensedPriceIdAndQuantity.quantity &&
+        phaseACreditPackPriceId === phaseBCreditPackPriceId
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  // V2 counterpart of getMeteredPriceIdFromPhaseUpdateParams
+  // In V2 the credit pack item has quantity: 1
+  getCreditPackPriceIdFromPhaseUpdateParams(
+    phase: Stripe.SubscriptionScheduleUpdateParams.Phase,
+  ): string {
+    const items = phase.items ?? [];
+    const licensedPriceIdAndQuantity =
+      this.getLicensedPriceIdAndQuantityFromPhaseUpdateParams(phase);
+
+    const creditPackItem = items.find(
+      (item) =>
+        item.price !== licensedPriceIdAndQuantity.price &&
+        item.quantity === 1,
+    );
+
+    if (!creditPackItem?.price) {
+      throw new Error('Credit pack item not found in V2 phase params');
+    }
+
+    return creditPackItem.price;
+  }
 }

@@ -58,6 +58,40 @@ export class BillingSubscriptionItemService {
     );
   }
 
+  async getResourceCreditSubscriptionItemDetails(subscriptionId: string): Promise<{
+    stripeSubscriptionItemId: string;
+    productKey: BillingProductKey;
+    creditAmount: number;
+    freeTrialQuantity: number;
+    unitPriceCents: number;
+  } | null> {
+    const item = await this.billingSubscriptionItemRepository.findOne({
+      where: {
+        billingSubscriptionId: subscriptionId,
+        billingProduct: {
+          metadata: { productKey: BillingProductKey.RESOURCE_CREDIT },
+        },
+      },
+      relations: ['billingProduct', 'billingProduct.billingPrices'],
+    });
+
+    if (!item) {
+      return null;
+    }
+
+    const price = this.findMatchingPrice(item);
+
+    return {
+      stripeSubscriptionItemId: item.stripeSubscriptionItemId,
+      productKey: BillingProductKey.RESOURCE_CREDIT,
+      creditAmount: Number(price.metadata?.credit_amount ?? 0),
+      freeTrialQuantity: this.twentyConfigService.get(
+        'BILLING_FREE_WORKFLOW_CREDITS_FOR_TRIAL_PERIOD_WITHOUT_CREDIT_CARD',
+      ),
+      unitPriceCents: price.unitAmount ?? 0,
+    };
+  }
+
   private findMatchingPrice(
     item: BillingSubscriptionItemEntity,
   ): BillingPriceEntity {

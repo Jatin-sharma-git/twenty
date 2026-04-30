@@ -95,6 +95,38 @@ export class BillingPlanService {
     });
   }
 
+  async listPlansV2(): Promise<BillingGetPlanResult[]> {
+    const planKeys = Object.values(BillingPlanKey);
+
+    const products = await this.billingProductRepository.find({
+      where: {
+        active: true,
+        billingPrices: {
+          active: true,
+        },
+      },
+      relations: ['billingPrices.billingProduct'],
+    });
+
+    return planKeys.map((planKey) => {
+      const planProducts = products.filter(
+        (product) => product.metadata.planKey === planKey,
+      );
+
+      const licensedProducts = planProducts.filter(
+        (product) =>
+          product.metadata.productKey === BillingProductKey.BASE_PRODUCT ||
+          product.metadata.productKey === BillingProductKey.RESOURCE_CREDIT,
+      );
+
+      return {
+        planKey,
+        meteredProducts: [],
+        licensedProducts,
+      };
+    });
+  }
+
   async getPlanByPriceId(stripePriceId: string) {
     const plans = await this.listPlans();
 
