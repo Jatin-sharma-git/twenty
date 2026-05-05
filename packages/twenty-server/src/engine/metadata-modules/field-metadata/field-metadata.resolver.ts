@@ -20,8 +20,15 @@ import { RelationDTO } from 'src/engine/metadata-modules/field-metadata/dtos/rel
 import { UpdateOneFieldMetadataInput } from 'src/engine/metadata-modules/field-metadata/dtos/update-field.input';
 import { FieldMetadataService } from 'src/engine/metadata-modules/field-metadata/services/field-metadata.service';
 import { fieldMetadataGraphqlApiExceptionHandler } from 'src/engine/metadata-modules/field-metadata/utils/field-metadata-graphql-api-exception-handler.util';
+import { resolveFieldMetadataStandardOverride } from 'src/engine/metadata-modules/field-metadata/utils/resolve-field-metadata-standard-override.util';
 import { fromFlatFieldMetadataToFieldMetadataDto } from 'src/engine/metadata-modules/flat-field-metadata/utils/from-flat-field-metadata-to-field-metadata-dto.util';
 import { PermissionsGraphqlApiExceptionFilter } from 'src/engine/metadata-modules/permissions/utils/permissions-graphql-api-exception.filter';
+
+// Keep @Parent() structurally typed so ResolverValidationPipe does not validate
+// FieldMetadataDTO date decorators on already-loaded parent records.
+type FieldMetadataStandardOverrideParent = Parameters<
+  typeof resolveFieldMetadataStandardOverride
+>[0];
 
 @UseGuards(WorkspaceAuthGuard)
 @UsePipes(ResolverValidationPipe)
@@ -32,6 +39,51 @@ import { PermissionsGraphqlApiExceptionFilter } from 'src/engine/metadata-module
 )
 export class FieldMetadataResolver {
   constructor(private readonly fieldMetadataService: FieldMetadataService) {}
+
+  @ResolveField(() => String, { nullable: true })
+  async label(
+    @Parent() fieldMetadata: FieldMetadataStandardOverrideParent,
+    @Context() context: I18nContext,
+  ): Promise<string> {
+    const i18n = this.i18nService.getI18nInstance(context.req.locale);
+
+    return resolveFieldMetadataStandardOverride(
+      fieldMetadata,
+      'label',
+      context.req.locale,
+      i18n,
+    );
+  }
+
+  @ResolveField(() => String, { nullable: true })
+  async description(
+    @Parent() fieldMetadata: FieldMetadataStandardOverrideParent,
+    @Context() context: I18nContext,
+  ): Promise<string> {
+    const i18n = this.i18nService.getI18nInstance(context.req.locale);
+
+    return resolveFieldMetadataStandardOverride(
+      fieldMetadata,
+      'description',
+      context.req.locale,
+      i18n,
+    );
+  }
+
+  @ResolveField(() => String, { nullable: true })
+  async icon(
+    @Parent() fieldMetadata: FieldMetadataStandardOverrideParent,
+    @Context() context: I18nContext,
+  ): Promise<string> {
+    const i18n = this.i18nService.getI18nInstance(context.req.locale);
+
+    return resolveFieldMetadataStandardOverride(
+      fieldMetadata,
+      'icon',
+      context.req.locale,
+      i18n,
+    );
+  }
 
   @UseGuards(SettingsPermissionGuard(PermissionFlagType.DATA_MODEL))
   @Mutation(() => FieldMetadataDTO)
